@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SELENE-TWIN // Lunar Surface Asset Telemetry & Digital Twin System</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome CDN for aerospace icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Orbitron & JetBrains Mono for Mission Control HUD -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        lunar: {
+                            900: '#06080e',
+                            800: '#0b101b',
+                            700: '#141c2e',
+                            600: '#1e293b',
+                            accent: '#00f0ff',
+                            warning: '#ffb703',
+                            danger: '#ff0055',
+                            success: '#00ff88',
+                            gold: '#fbbf24'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                        hud: ['"Orbitron"', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom HUD aesthetic styling */
+        body {
+            background-color: #03060c;
+            color: #d1d5db;
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            user-select: none;
+        }
+        .hud-border {
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            background: rgba(11, 16, 27, 0.82);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.04);
+        }
+        .hud-glow {
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.65);
+        }
+        .hud-scanline {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(11, 16, 27, 0.9);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 240, 255, 0.4);
+            border-radius: 2px;
+        }
+        /* Pulse animations */
+        @keyframes radar-ping {
+            0% { transform: scale(0.9); opacity: 1; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+        .radar-ping {
+            animation: radar-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+        /* Range slider styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: #1e293b;
+            height: 4px;
+            border-radius: 2px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #00f0ff;
+            cursor: pointer;
+            box-shadow: 0 0 6px #00f0ff;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative overflow-hidden select-none flex flex-col justify-between">
+    <div class="hud-scanline absolute inset-0 z-30 pointer-events-none opacity-40"></div>
+    <canvas id="viewport" class="absolute inset-0 w-full h-full z-0 block cursor-grab active:cursor-grabbing"></canvas>
+
+    <!-- TOP HEADER: Mission Control HUD Bar -->
+    <header class="relative z-20 w-full px-5 py-3 flex items-center justify-between hud-border border-t-0 border-x-0 bg-opacity-90">
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-satellite-dish text-lunar-accent text-xl animate-pulse"></i>
+                <h1 class="font-hud font-bold text-lg md:text-xl tracking-wider text-white">
+                    SELENE<span class="text-lunar-accent">-TWIN</span>
+                </h1>
+            </div>
+            <span class="text-xs bg-lunar-accent/10 border border-lunar-accent/40 text-lunar-accent px-2 py-0.5 rounded tracking-widest hidden sm:inline-block">
+                CISLUNAR SURFACE OPS // REV 4.28
+            </span>
+            <span class="text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                LINK ESTABLISHED (DSN GOLDSTONE)
+            </span>
+        </div>
+
+        <!-- Telemetry clock & latency status -->
+        <div class="flex items-center space-x-6 text-xs text-slate-300">
+            <div class="hidden md:flex flex-col text-right">
+                <span class="text-[10px] text-slate-400">PROPAGATION DELAY</span>
+                <span class="font-bold text-lunar-accent">1.282 s (ONE-WAY)</span>
+            </div>
+            <div class="hidden md:flex flex-col text-right">
+                <span class="text-[10px] text-slate-400">MISSION ELAPSED TIME</span>
+                <span class="font-bold text-white tracking-widest" id="met-clock">MET +148:19:42</span>
+            </div>
+            <div class="flex items-center space-x-2 border-l border-slate-700 pl-4">
+                <button id="btn-toggle-hud" class="px-2.5 py-1.5 rounded bg-lunar-800 hover:bg-lunar-700 border border-slate-700 text-slate-300 text-xs transition">
+                    <i class="fa-solid fa-eye-slash mr-1"></i> HUD
+                </button>
+                <button id="btn-emergency-ping" class="px-3 py-1.5 rounded bg-rose-950/60 hover:bg-rose-900 border border-rose-500/50 text-rose-300 text-xs transition font-semibold">
+                    <i class="fa-solid fa-triangle-exclamation mr-1 text-rose-400"></i> ALERT TEST
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="relative z-10 flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 p-3 overflow-hidden pointer-events-none">
+        
+        <!-- LEFT PANEL: Asset Directory & View Navigation Controls -->
+        <aside class="md:col-span-3 lg:col-span-3 flex flex-col space-y-3 pointer-events-auto h-full overflow-hidden transition-transform duration-300" id="left-sidebar">
+            
+            <!-- View Mode Selector -->
+            <div class="hud-border rounded-lg p-3 text-xs flex flex-col gap-2">
+                <div class="flex items-center justify-between pb-1 border-b border-slate-700/60">
+                    <span class="font-hud text-slate-400 tracking-wider">CAMERA TRAJECTORY</span>
+                    <i class="fa-solid fa-crosshairs text-lunar-accent"></i>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 pt-1">
+                    <button class="nav-view-btn px-2 py-2 rounded bg-lunar-accent/20 border border-lunar-accent text-lunar-accent font-semibold transition text-center" data-view="global">
+                        <i class="fa-solid fa-globe block text-sm mb-1"></i> CISLUNAR
+                    </button>
+                    <button class="nav-view-btn px-2 py-2 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 transition text-center" data-view="southpole">
+                        <i class="fa-solid fa-compass block text-sm mb-1 text-sky-400"></i> SHACKLETON
+                    </button>
+                    <button class="nav-view-btn px-2 py-2 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 transition text-center" data-view="basealpha">
+                        <i class="fa-solid fa-campground block text-sm mb-1 text-emerald-400"></i> BASE ALPHA
+                    </button>
+                    <button class="nav-view-btn px-2 py-2 rounded bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 transition text-center" data-view="rover">
+                        <i class="fa-solid fa-truck-monster block text-sm mb-1 text-amber-400"></i> ROVER XR-4
+                    </button>
+                </div>
+                <!-- Interactive Zoom Sliders & Helpers -->
+                <div class="pt-2 flex items-center justify-between border-t border-slate-700/60 text-[11px] text-slate-400">
+                    <span>ZOOM STEP</span>
+                    <div class="space-x-1">
+                        <button id="btn-zoom-in" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded border border-slate-600 transition" title="Zoom In">+</button>
+                        <button id="btn-zoom-out" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded border border-slate-600 transition" title="Zoom Out">−</button>
+                        <button id="btn-reset-cam" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-600 transition text-[10px]">RESET</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Assets List -->
+            <div class="hud-border rounded-lg p-3 flex-1 flex flex-col min-h-0 text-xs">
+                <div class="flex items-center justify-between pb-2 border-b border-slate-700/60 mb-2">
+                    <span class="font-hud text-slate-400 tracking-wider">DEPLOYED SURFACE ASSETS (5)</span>
+                    <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">ALL NOMINAL</span>
+                </div>
+                
+                <div class="space-y-1.5 overflow-y-auto pr-1 flex-1" id="asset-list-container">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+
+            <!-- Solar Angle / Lighting Simulation Controller -->
+            <div class="hud-border rounded-lg p-3 text-xs space-y-2">
+                <div class="flex justify-between items-center text-slate-400">
+                    <span class="font-hud text-[11px]">SOLAR SUB-SOLAR LONGITUDE</span>
+                    <span id="sun-angle-val" class="text-lunar-accent font-bold">142° E</span>
+                </div>
+                <input id="sun-slider" type="range" min="0" max="360" value="142" class="w-full">
+                <div class="flex justify-between text-[10px] text-slate-500">
+                    <span>LUNAR DAWN</span>
+                    <span>NOON</span>
+                    <span>LUNAR NIGHT</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER HUD OVERLAY: Flight Vectors & Reticle Controls -->
+        <main class="md:col-span-6 lg:col-span-6 flex flex-col justify-between pointer-events-none p-2">
+            <!-- Top reticle info -->
+            <div class="hud-border rounded-lg p-2.5 max-w-fit mx-auto pointer-events-auto flex items-center space-x-6 text-[11px] text-slate-300">
+                <div class="flex items-center space-x-2">
+                    <span class="text-slate-500 font-bold">LAT:</span>
+                    <span id="hud-lat" class="text-white font-mono font-semibold">-89.921° S</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="text-slate-500 font-bold">LON:</span>
+                    <span id="hud-lon" class="text-white font-mono font-semibold">0.000° E</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="text-slate-500 font-bold">ALT:</span>
+                    <span id="hud-alt" class="text-lunar-accent font-mono font-bold">428.5 km</span>
+                </div>
+                <div class="flex items-center space-x-1.5 text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                    <i class="fa-solid fa-sun text-xs animate-spin-slow"></i>
+                    <span id="hud-illum">ILLUM: 92%</span>
+                </div>
+            </div>
+
+            <!-- Central dynamic 3D marker tag projection placeholder (handled in canvas overlay) -->
+            <div id="target-marker-box" class="self-center hidden pointer-events-auto text-center">
+                <div class="w-12 h-12 border-2 border-lunar-accent rounded-full border-dashed animate-spin-slow mx-auto relative flex items-center justify-center">
+                    <div class="w-2 h-2 bg-lunar-accent rounded-full"></div>
+                </div>
+                <span id="target-marker-name" class="mt-1 block text-xs bg-lunar-900/90 border border-lunar-accent px-2 py-0.5 rounded text-lunar-accent font-hud">
+                    SHACKLETON BASIN
+                </span>
+            </div>
+
+            <!-- Bottom Floating Camera Compass and Quick Instructions -->
+            <div class="hud-border rounded-lg px-4 py-2 text-[11px] text-slate-400 flex items-center justify-between mx-auto w-full max-w-xl pointer-events-auto backdrop-blur-md">
+                <div class="flex items-center gap-3">
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-arrows-up-down-left-right text-lunar-accent"></i> Left Click: Orbit</span>
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-computer-mouse text-lunar-accent"></i> Wheel: Zoom In/Out</span>
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-hand text-lunar-accent"></i> Right Click: Pan</span>
+                </div>
+                <button id="btn-toggle-autospin" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 rounded text-[10px] transition">
+                    <i class="fa-solid fa-rotate mr-1"></i> ROTATE: ON
+                </button>
+            </div>
+        </main>
+
+        <aside class="md:col-span-3 lg:col-span-3 flex flex-col space-y-3 pointer-events-auto h-full overflow-hidden" id="right-sidebar">
+            
+            <!-- Asset Digital Twin Profile -->
+            <div class="hud-border rounded-lg p-3 text-xs flex flex-col space-y-2">
+                <div class="flex items-center justify-between pb-1 border-b border-slate-700/60">
+                    <div>
+                        <div class="font-hud font-bold text-white text-sm" id="twin-asset-name">BASE ALPHA HABITAT</div>
+                        <div class="text-[10px] text-slate-400 font-mono" id="twin-asset-id">NASA-ARTEMIS-HA-01</div>
+                    </div>
+                    <span id="twin-status-pill" class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold">
+                        ACTIVE
+                    </span>
+                </div>
+
+                <!-- 3D Mini Wireframe Visualizer Canvas Container -->
+                <div class="w-full h-32 rounded bg-black/60 border border-slate-800 relative overflow-hidden flex items-center justify-center">
+                    <canvas id="mini-wireframe-canvas" class="w-full h-full block"></canvas>
+                    <div class="absolute bottom-1 right-2 text-[9px] text-slate-500 font-mono">DIGITAL TWIN MESH // L-LOD</div>
+                    <div class="absolute top-1 left-2 text-[9px] text-lunar-accent font-hud flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-lunar-accent animate-ping"></span> REALTIME SYNC
+                    </div>
+                </div>
+
+                <!-- Telemetry KPI Gauges -->
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <div class="bg-lunar-900/90 p-2 rounded border border-slate-800/80">
+                        <div class="text-[10px] text-slate-400">REGOLITH DUST LOAD</div>
+                        <div class="text-sm font-bold text-amber-400 mt-0.5" id="kpi-dust">14.8 %</div>
+                        <div class="w-full bg-slate-800 h-1 rounded mt-1.5 overflow-hidden">
+                            <div id="kpi-dust-bar" class="bg-amber-400 h-full w-[15%] transition-all duration-500"></div>
+                        </div>
+                    </div>
+                    <div class="bg-lunar-900/90 p-2 rounded border border-slate-800/80">
+                        <div class="text-[10px] text-slate-400">THERMAL GRADIENT</div>
+                        <div class="text-sm font-bold text-sky-400 mt-0.5" id="kpi-thermal">-32.4 °C</div>
+                        <div class="w-full bg-slate-800 h-1 rounded mt-1.5 overflow-hidden">
+                            <div id="kpi-thermal-bar" class="bg-sky-400 h-full w-[48%] transition-all duration-500"></div>
+                        </div>
+                    </div>
+                    <div class="bg-lunar-900/90 p-2 rounded border border-slate-800/80">
+                        <div class="text-[10px] text-slate-400">RADIATION FLUX</div>
+                        <div class="text-sm font-bold text-rose-400 mt-0.5" id="kpi-rad">0.42 mSv/h</div>
+                        <div class="w-full bg-slate-800 h-1 rounded mt-1.5 overflow-hidden">
+                            <div id="kpi-rad-bar" class="bg-rose-400 h-full w-[28%] transition-all duration-500"></div>
+                        </div>
+                    </div>
+                    <div class="bg-lunar-900/90 p-2 rounded border border-slate-800/80">
+                        <div class="text-[10px] text-slate-400">POWER / BATTERY SOC</div>
+                        <div class="text-sm font-bold text-emerald-400 mt-0.5" id="kpi-battery">94.2 %</div>
+                        <div class="w-full bg-slate-800 h-1 rounded mt-1.5 overflow-hidden">
+                            <div id="kpi-battery-bar" class="bg-emerald-400 h-full w-[94%] transition-all duration-500"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sub-Component Health Breakdown -->
+            <div class="hud-border rounded-lg p-3 text-xs flex flex-col space-y-2">
+                <div class="flex items-center justify-between pb-1 border-b border-slate-700/60">
+                    <span class="font-hud text-slate-400">SUB-SUBSYSTEM HEALTH</span>
+                    <span class="text-[10px] text-slate-400">AI PREDICTION</span>
+                </div>
+                <div class="space-y-1.5" id="subsystem-items">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+
+            <!-- Predictive Maintenance Event Stream -->
+            <div class="hud-border rounded-lg p-3 text-xs flex-1 flex flex-col min-h-0">
+                <div class="flex items-center justify-between pb-1 border-b border-slate-700/60 mb-2">
+                    <span class="font-hud text-slate-400 tracking-wider">PREDICTIVE ANOMALY LOG</span>
+                    <i class="fa-solid fa-microchip text-slate-500"></i>
+                </div>
+                <div class="overflow-y-auto space-y-1.5 pr-1 flex-1 font-mono text-[10px]" id="anomaly-log-stream">
+                    <!-- Dynamic logs -->
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        /* Asset Registry Data Model */
+        const LUNAR_ASSETS = [
+            {
+                id: 'base-alpha',
+                name: 'Artemis Base Alpha - Dome',
+                code: 'NASA-ABA-01',
+                type: 'HABITAT',
+                icon: 'fa-campground',
+                color: '#00ff88',
+                coords: { lat: -89.92, lon: 0.0, alt: 0 },
+                pos: new THREE.Vector3(0, -9.98, 0.4),
+                telemetry: {
+                    dust: 12.4,
+                    thermal: 18.2,
+                    radiation: 0.28,
+                    battery: 98.4,
+                    structural: 99.2
+                },
+                components: [
+                    { name: 'Regolith Shield Shell', status: 'NOMINAL', health: 99 },
+                    { name: 'Airlock Outer Seal Ring', status: 'NOMINAL', health: 96 },
+                    { name: 'ECLSS O2 Circulation Loop', status: 'OPTIMAL', health: 97 },
+                    { name: 'Radiator Heat Exchanger', status: 'INSPECTION DUE', health: 88 }
+                ]
+            },
+            {
+                id: 'rover-xr4',
+                name: 'Autonomous Excavator XR-4',
+                code: 'ISRU-ROV-04',
+                type: 'ROVER',
+                icon: 'fa-truck-monster',
+                color: '#ffb703',
+                coords: { lat: -89.65, lon: 18.2, alt: 0 },
+                pos: new THREE.Vector3(0.5, -9.96, 0.6),
+                telemetry: {
+                    dust: 38.6,
+                    thermal: -54.1,
+                    radiation: 0.64,
+                    battery: 78.1,
+                    structural: 91.5
+                },
+                components: [
+                    { name: 'Wheel Actuator Cluster 3', status: 'ABRASION WARN', health: 74 },
+                    { name: 'Regolith Vacuum Scoop', status: 'NOMINAL', health: 92 },
+                    { name: 'LiDAR Navigation Mast', status: 'CALIBRATED', health: 95 },
+                    { name: 'Stereo Optical Sensor 1', status: 'DIRTY LENS', health: 81 }
+                ]
+            },
+            {
+                id: 'fspu-1',
+                name: 'Fission Surface Power Unit 1',
+                code: 'DOE-NASA-FSPU',
+                type: 'POWER',
+                icon: 'fa-atom',
+                color: '#00f0ff',
+                coords: { lat: -89.78, lon: -22.5, alt: 0 },
+                pos: new THREE.Vector3(-0.6, -9.95, -0.4),
+                telemetry: {
+                    dust: 8.1,
+                    thermal: 114.5,
+                    radiation: 1.84,
+                    battery: 100.0,
+                    structural: 99.8
+                },
+                components: [
+                    { name: 'Stirling Engine Alternators', status: 'PEAK SYNC', health: 98 },
+                    { name: 'Deployable Potassium Radiator', status: 'OPTIMAL', health: 97 },
+                    { name: 'Shielded Core Neutron Trap', status: 'NOMINAL', health: 99 },
+                    { name: 'High-Temp Coolant Pump B', status: 'CYCLE HIGH', health: 90 }
+                ]
+            },
+            {
+                id: 'lander-peregrine',
+                name: 'CLPS Lander Peregrine-VII',
+                code: 'CLPS-LD-07',
+                type: 'LANDER',
+                icon: 'fa-shuttle-space',
+                color: '#ec4899',
+                coords: { lat: -88.90, lon: 45.1, alt: 0 },
+                pos: new THREE.Vector3(1.2, -9.90, 0.2),
+                telemetry: {
+                    dust: 24.2,
+                    thermal: -12.0,
+                    radiation: 0.45,
+                    battery: 89.0,
+                    structural: 96.0
+                },
+                components: [
+                    { name: 'Descent Engine Hypergolic Line', status: 'PURGED/SAFE', health: 100 },
+                    { name: 'Terrain Relative Nav (TRN)', status: 'STANDBY', health: 98 },
+                    { name: 'Payload Bay Interface Bus', status: 'ACTIVE', health: 94 },
+                    { name: 'Landing Strut Honeycomb Core', status: 'COMPRESSED (NOM)', health: 92 }
+                ]
+            },
+            {
+                id: 'comm-relay',
+                name: 'Comm Relay Mast (DTN/S-Band)',
+                code: 'LUNAR-RELAY-02',
+                type: 'COMMUNICATION',
+                icon: 'fa-tower-broadcast',
+                color: '#a855f7',
+                coords: { lat: -89.84, lon: -5.0, alt: 0 },
+                pos: new THREE.Vector3(-0.15, -9.98, 0.2),
+                telemetry: {
+                    dust: 16.0,
+                    thermal: -42.8,
+                    radiation: 0.35,
+                    battery: 92.5,
+                    structural: 98.7
+                },
+                components: [
+                    { name: 'Phased Array Antenna Face', status: 'NOMINAL', health: 96 },
+                    { name: 'DTN Store-and-Forward Cache', status: 'BUFFER 14%', health: 99 },
+                    { name: 'Gimbal Elevation Motor', status: 'NOMINAL', health: 94 },
+                    { name: 'Cryo Low-Noise Amplifier', status: 'LOCKED', health: 98 }
+                ]
+            }
+        ];
+
+        /* Global Application State */
+        let activeAsset = LUNAR_ASSETS[0];
+        let autoRotate = true;
+        let sunAngleDeg = 142;
+
+        const canvas = document.getElementById('viewport');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020408);
+        scene.fog = new THREE.FogExp2(0x020408, 0.002);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 14, 28);
+
+        // Lighting simulation
+        const ambientLight = new THREE.AmbientLight(0x1a2638, 0.4);
+        scene.add(ambientLight);
+
+        // Earthshine subtle fill light
+        const earthshine = new THREE.DirectionalLight(0x406085, 0.35);
+        earthshine.position.set(-30, 10, -20);
+        scene.add(earthshine);
+
+        // Sub-solar directional primary sunlight
+        const sunLight = new THREE.DirectionalLight(0xfff7e6, 2.2);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 5;
+        sunLight.shadow.camera.far = 100;
+        sunLight.shadow.bias = -0.0005;
+        scene.add(sunLight);
+
+        function updateSunPosition(deg) {
+            const rad = (deg * Math.PI) / 180;
+            const dist = 50;
+            sunLight.position.set(Math.cos(rad) * dist, 6, Math.sin(rad) * dist);
+            sunLight.lookAt(0, 0, 0);
+            document.getElementById('sun-angle-val').textContent = `${Math.round(deg)}° E`;
+            const illumPct = Math.round(Math.max(10, Math.sin(rad) * 45 + 50));
+            document.getElementById('hud-illum').textContent = `ILLUM: ${illumPct}%`;
+        }
+        updateSunPosition(sunAngleDeg);
+
+        function generateProceduralLunarTextures() {
+            const texWidth = 2048;
+            const texHeight = 1024;
+            
+            // Diffuse albedo map
+            const diffuseCanvas = document.createElement('canvas');
+            diffuseCanvas.width = texWidth;
+            diffuseCanvas.height = texHeight;
+            const ctx = diffuseCanvas.getContext('2d');
+
+            // Base lunar regolith tone
+            ctx.fillStyle = '#6b7280';
+            ctx.fillRect(0, 0, texWidth, texHeight);
+
+            // Add fine multi-octave regolith noise
+            const imgData = ctx.getImageData(0, 0, texWidth, texHeight);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const noise = (Math.random() - 0.5) * 45;
+                data[i] = Math.min(255, Math.max(0, data[i] + noise));
+                data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + noise));
+                data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + noise));
+            }
+            ctx.putImageData(imgData, 0, 0);
+
+            // Procedural crater stamps (including maria and impact craters)
+            function drawCrater(x, y, radius, depth) {
+                const grad = ctx.createRadialGradient(x, y, radius * 0.1, x, y, radius);
+                grad.addColorStop(0, depth > 0 ? '#374151' : '#1f2937');
+                grad.addColorStop(0.7, '#4b5563');
+                grad.addColorStop(0.85, '#9ca3af'); // rim ejecta
+                grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Generate Lunar Maria (dark basaltic plains)
+            for (let i = 0; i < 9; i++) {
+                const mx = Math.random() * texWidth;
+                const my = Math.random() * (texHeight * 0.6) + (texHeight * 0.2);
+                const mr = Math.random() * 180 + 70;
+                drawCrater(mx, my, mr, -1);
+            }
+
+            // Dense crater scatter across highlands and South Pole region
+            for (let i = 0; i < 450; i++) {
+                const cx = Math.random() * texWidth;
+                const cy = Math.random() * texHeight;
+                const cr = Math.random() * 22 + 4;
+                drawCrater(cx, cy, cr, 1);
+            }
+
+            // Prominent South Pole Shackleton-like feature
+            drawCrater(texWidth * 0.5, texHeight * 0.95, 65, 1.5);
+
+            // Bump map canvas from same generation
+            const diffuseTexture = new THREE.CanvasTexture(diffuseCanvas);
+            diffuseTexture.wrapS = THREE.RepeatWrapping;
+            diffuseTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+            return diffuseTexture;
+        }
+
+        const lunarTexture = generateProceduralLunarTextures();
+        const moonRadius = 10;
+        const moonGeo = new THREE.SphereGeometry(moonRadius, 64, 64);
+        const moonMat = new THREE.MeshStandardMaterial({
+            map: lunarTexture,
+            roughness: 0.88,
+            metalness: 0.05,
+            bumpMap: lunarTexture,
+            bumpScale: 0.18
+        });
+        const moonMesh = new THREE.Mesh(moonGeo, moonMat);
+        moonMesh.receiveShadow = true;
+        moonMesh.castShadow = true;
+        scene.add(moonMesh);
+
+        /* Starfield background generation */
+        function createDeepSpaceStarfield() {
+            const starsGeo = new THREE.BufferGeometry();
+            const starCount = 3500;
+            const positions = new Float32Array(starCount * 3);
+            const colors = new Float32Array(starCount * 3);
+
+            for (let i = 0; i < starCount * 3; i += 3) {
+                const r = 250 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(Math.random() * 2 - 1);
+
+                positions[i] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+                positions[i + 2] = r * Math.cos(phi);
+
+                // Slight color tinting
+                const tint = Math.random();
+                colors[i] = 0.85 + tint * 0.15;
+                colors[i + 1] = 0.85 + tint * 0.15;
+                colors[i + 2] = 1.0;
+            }
+
+            starsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            starsGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const starsMat = new THREE.PointsMaterial({
+                size: 1.2,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.85
+            });
+            const starField = new THREE.Points(starsGeo, starsMat);
+            scene.add(starField);
+        }
+        createDeepSpaceStarfield();
+
+        /* Distance Orbit ring for Shackleton Crater reference */
+        const ringGeo = new THREE.RingGeometry(10.02, 10.06, 64);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, side: THREE.DoubleSide, transparent: true, opacity: 0.35 });
+        const southPoleRing = new THREE.Mesh(ringGeo, ringMat);
+        southPoleRing.rotation.x = Math.PI / 2;
+        southPoleRing.position.y = -9.98;
+        scene.add(southPoleRing);
+
+        const assetMarkersGroup = new THREE.Group();
+        scene.add(assetMarkersGroup);
+
+        const assetPinMap = new Map();
+
+        LUNAR_ASSETS.forEach(asset => {
+            const markerContainer = new THREE.Group();
+            markerContainer.position.copy(asset.pos);
+
+            // Ground base beacon ring
+            const beaconGeo = new THREE.RingGeometry(0.08, 0.18, 32);
+            const beaconMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(asset.color), side: THREE.DoubleSide });
+            const beaconRing = new THREE.Mesh(beaconGeo, beaconMat);
+            beaconRing.rotation.x = -Math.PI / 2;
+            markerContainer.add(beaconRing);
+
+            // Vertical indicator pin
+            const pinGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.7, 8);
+            pinGeo.translate(0, 0.35, 0);
+            const pinMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const pinMesh = new THREE.Mesh(pinGeo, pinMat);
+            markerContainer.add(pinMesh);
+
+            // Diamond glowing head
+            const headGeo = new THREE.OctahedronGeometry(0.12, 0);
+            headGeo.translate(0, 0.75, 0);
+            const headMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(asset.color),
+                emissive: new THREE.Color(asset.color),
+                emissiveIntensity: 0.9,
+                metalness: 0.2,
+                roughness: 0.3
+            });
+            const headMesh = new THREE.Mesh(headGeo, headMat);
+            markerContainer.add(headMesh);
+
+            markerContainer.userData = { assetId: asset.id, asset: asset, headMesh: headMesh };
+            assetMarkersGroup.add(markerContainer);
+            assetPinMap.set(asset.id, markerContainer);
+        });
+
+        let isDragging = false;
+        let prevMousePos = { x: 0, y: 0 };
+        const targetLookAt = new THREE.Vector3(0, 0, 0);
+        const currentLookAt = new THREE.Vector3(0, 0, 0);
+
+        // Smooth camera transition state
+        let targetCamPos = camera.position.clone();
+        let targetCamLookAt = new THREE.Vector3(0, 0, 0);
+        let isTransitioning = false;
+
+        function setCameraView(mode, assetObj = null) {
+            isTransitioning = true;
+            autoRotate = false;
+            document.getElementById('btn-toggle-autospin').innerHTML = `<i class="fa-solid fa-rotate mr-1"></i> ROTATE: OFF`;
+
+            if (mode === 'global') {
+                targetCamPos.set(0, 12, 28);
+                targetCamLookAt.set(0, 0, 0);
+            } else if (mode === 'southpole') {
+                targetCamPos.set(0, -17.5, 4.5);
+                targetCamLookAt.set(0, -9.9, 0);
+            } else if (mode === 'basealpha') {
+                const base = LUNAR_ASSETS.find(a => a.id === 'base-alpha');
+                targetCamPos.set(base.pos.x + 0.8, base.pos.y - 1.2, base.pos.z + 1.8);
+                targetCamLookAt.copy(base.pos);
+                selectAsset(base.id);
+            } else if (mode === 'rover') {
+                const rov = LUNAR_ASSETS.find(a => a.id === 'rover-xr4');
+                targetCamPos.set(rov.pos.x + 0.9, rov.pos.y - 1.0, rov.pos.z + 1.6);
+                targetCamLookAt.copy(rov.pos);
+                selectAsset(rov.id);
+            } else if (mode === 'asset' && assetObj) {
+                targetCamPos.set(assetObj.pos.x * 1.25 + 0.5, assetObj.pos.y * 1.25 - 0.6, assetObj.pos.z * 1.25 + 1.4);
+                targetCamLookAt.copy(assetObj.pos);
+            }
+        }
+
+        // Raycasting for pin clicks
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function handlePointerDown(e) {
+            isDragging = true;
+            prevMousePos = { x: e.clientX, y: e.clientY };
+        }
+
+        function handlePointerMove(e) {
+            if (isDragging) {
+                const deltaX = e.clientX - prevMousePos.x;
+                const deltaY = e.clientY - prevMousePos.y;
+
+                // Spherical rotation around look-at target
+                const offset = camera.position.clone().sub(currentLookAt);
+                let radius = offset.length();
+                let theta = Math.atan2(offset.x, offset.z);
+                let phi = Math.acos(Math.max(-1, Math.min(1, offset.y / radius)));
+
+                theta -= deltaX * 0.006;
+                phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi - deltaY * 0.006));
+
+                offset.x = radius * Math.sin(phi) * Math.sin(theta);
+                offset.y = radius * Math.cos(phi);
+                offset.z = radius * Math.sin(phi) * Math.cos(theta);
+
+                camera.position.copy(currentLookAt).add(offset);
+                targetCamPos.copy(camera.position);
+
+                prevMousePos = { x: e.clientX, y: e.clientY };
+            }
+        }
+
+        function handlePointerUp(e) {
+            if (!isDragging) return;
+            isDragging = false;
+        }
+
+        // Check asset marker clicks
+        canvas.addEventListener('click', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(assetMarkersGroup.children, true);
+
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while (obj.parent && !obj.userData.assetId) {
+                    obj = obj.parent;
+                }
+                if (obj.userData && obj.userData.assetId) {
+                    selectAsset(obj.userData.assetId);
+                    setCameraView('asset', obj.userData.asset);
+                }
+            }
+        });
+
+        // Mouse Wheel Zoom
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomFactor = e.deltaY * 0.002;
+            const dist = camera.position.distanceTo(currentLookAt);
+            if ((dist > 11.5 || zoomFactor > 0) && (dist < 60 || zoomFactor < 0)) {
+                camera.position.lerp(currentLookAt, -zoomFactor);
+                targetCamPos.copy(camera.position);
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('mousedown', handlePointerDown);
+        window.addEventListener('mousemove', handlePointerMove);
+        window.addEventListener('mouseup', handlePointerUp);
+
+        // Touch event support for mobile tablet demos
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                prevMousePos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches.length === 1) {
+                handlePointerMove({ clientX: e.touches[0].clientX, clientY: e.touches[0].clientY });
+            }
+        });
+        canvas.addEventListener('touchend', () => { isDragging = false; });
+
+        const miniCanvas = document.getElementById('mini-wireframe-canvas');
+        const miniRenderer = new THREE.WebGLRenderer({ canvas: miniCanvas, antialias: true, alpha: true });
+        miniRenderer.setSize(miniCanvas.clientWidth, miniCanvas.clientHeight);
+
+        const miniScene = new THREE.Scene();
+        const miniCamera = new THREE.PerspectiveCamera(45, miniCanvas.clientWidth / miniCanvas.clientHeight, 0.1, 100);
+        miniCamera.position.set(0, 2.2, 4.5);
+        miniCamera.lookAt(0, 0, 0);
+
+        const miniLight = new THREE.DirectionalLight(0x00f0ff, 1.8);
+        miniLight.position.set(5, 10, 5);
+        miniScene.add(miniLight);
+        miniScene.add(new THREE.AmbientLight(0x334155, 1.2));
+
+        let miniTwinMeshGroup = new THREE.Group();
+        miniScene.add(miniTwinMeshGroup);
+
+        function updateMiniTwinMesh(asset) {
+            // Clear prior children
+            while (miniTwinMeshGroup.children.length > 0) {
+                miniTwinMeshGroup.remove(miniTwinMeshGroup.children[0]);
+            }
+
+            const matWire = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(asset.color),
+                wireframe: true,
+                emissive: new THREE.Color(asset.color),
+                emissiveIntensity: 0.35
+            });
+
+            if (asset.type === 'HABITAT') {
+                const dome = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), matWire);
+                const airlock = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 1.2), matWire);
+                airlock.position.set(0, 0.3, 1.2);
+                miniTwinMeshGroup.add(dome, airlock);
+            } else if (asset.type === 'ROVER') {
+                const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 1.0), matWire);
+                body.position.y = 0.5;
+                for (let wx = -0.7; wx <= 0.7; wx += 1.4) {
+                    for (let wz = -0.5; wz <= 0.5; wz += 1.0) {
+                        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.25, 12), matWire);
+                        wheel.rotation.z = Math.PI / 2;
+                        wheel.position.set(wx, 0.25, wz);
+                        miniTwinMeshGroup.add(wheel);
+                    }
+                }
+                const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.1), matWire);
+                mast.position.set(0.6, 1.1, 0);
+                miniTwinMeshGroup.add(body, mast);
+            } else if (asset.type === 'POWER') {
+                const core = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.8, 16), matWire);
+                const ringPanel = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.15, 8, 24), matWire);
+                ringPanel.rotation.x = Math.PI / 2;
+                miniTwinMeshGroup.add(core, ringPanel);
+            } else if (asset.type === 'LANDER') {
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.2, 1.4, 6), matWire);
+                body.position.y = 0.7;
+                miniTwinMeshGroup.add(body);
+            } else {
+                const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.4, 2.2, 8), matWire);
+                const dish = new THREE.Mesh(new THREE.ConeGeometry(0.8, 0.4, 16, 1, true), matWire);
+                dish.position.set(0, 1.1, 0);
+                dish.rotation.x = -Math.PI / 3;
+                miniTwinMeshGroup.add(tower, dish);
+            }
+        }
+
+        function selectAsset(assetId) {
+            const found = LUNAR_ASSETS.find(a => a.id === assetId);
+            if (!found) return;
+            activeAsset = found;
+
+            // Update Asset list highlight
+            renderAssetList();
+
+            // Update Panel Profile
+            document.getElementById('twin-asset-name').textContent = activeAsset.name;
+            document.getElementById('twin-asset-id').textContent = activeAsset.code;
+            
+            // Update Mini Digital Twin
+            updateMiniTwinMesh(activeAsset);
+
+            // Update KPIs
+            updateTelemetryDisplay();
+
+            // Update Subsystem components
+            const subContainer = document.getElementById('subsystem-items');
+            subContainer.innerHTML = '';
+            activeAsset.components.forEach(comp => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center justify-between p-1.5 rounded bg-lunar-900/60 border border-slate-800 text-[11px]';
+                const colorBadge = comp.health > 90 ? 'text-emerald-400' : (comp.health > 80 ? 'text-amber-400' : 'text-rose-400');
+                item.innerHTML = `
+                    <div class="flex items-center space-x-1.5 truncate">
+                        <i class="fa-solid fa-microchip text-slate-500 text-[10px]"></i>
+                        <span class="text-slate-300 font-mono truncate">${comp.name}</span>
+                    </div>
+                    <div class="flex items-center space-x-2 flex-shrink-0">
+                        <span class="text-[10px] ${colorBadge} font-mono">${comp.status}</span>
+                        <span class="font-bold text-white">${comp.health}%</span>
+                    </div>
+                `;
+                subContainer.appendChild(item);
+            });
+
+            // Target reticle
+            const reticle = document.getElementById('target-marker-box');
+            reticle.classList.remove('hidden');
+            document.getElementById('target-marker-name').textContent = activeAsset.name.toUpperCase();
+        }
+
+        function renderAssetList() {
+            const container = document.getElementById('asset-list-container');
+            container.innerHTML = '';
+            LUNAR_ASSETS.forEach(asset => {
+                const isSelected = asset.id === activeAsset.id;
+                const row = document.createElement('div');
+                row.className = `p-2 rounded cursor-pointer transition flex items-center justify-between border ${
+                    isSelected 
+                        ? 'bg-lunar-accent/15 border-lunar-accent text-white shadow-sm' 
+                        : 'bg-lunar-900/60 hover:bg-lunar-800/80 border-slate-800 text-slate-300'
+                }`;
+                row.onclick = () => {
+                    selectAsset(asset.id);
+                    setCameraView('asset', asset);
+                };
+
+                row.innerHTML = `
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-6 h-6 rounded flex items-center justify-center text-xs" style="color: ${asset.color}; background: ${asset.color}20">
+                            <i class="fa-solid ${asset.icon}"></i>
+                        </div>
+                        <div>
+                            <div class="font-semibold text-xs leading-none">${asset.name}</div>
+                            <div class="text-[10px] text-slate-400 font-mono mt-0.5">${asset.code}</div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                            asset.telemetry.battery > 85 ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'
+                        }">${asset.telemetry.battery.toFixed(0)}% SOC</span>
+                    </div>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function updateTelemetryDisplay() {
+            const t = activeAsset.telemetry;
+            document.getElementById('kpi-dust').textContent = `${t.dust.toFixed(1)} %`;
+            document.getElementById('kpi-dust-bar').style.width = `${Math.min(100, t.dust)}%`;
+
+            document.getElementById('kpi-thermal').textContent = `${t.thermal > 0 ? '+' : ''}${t.thermal.toFixed(1)} °C`;
+            const thermPct = THREE.MathUtils.clamp((t.thermal + 130) / 2.5, 0, 100);
+            document.getElementById('kpi-thermal-bar').style.width = `${thermPct}%`;
+
+            document.getElementById('kpi-rad').textContent = `${t.radiation.toFixed(2)} mSv/h`;
+            document.getElementById('kpi-rad-bar').style.width = `${Math.min(100, t.radiation * 50)}%`;
+
+            document.getElementById('kpi-battery').textContent = `${t.battery.toFixed(1)} %`;
+            document.getElementById('kpi-battery-bar').style.width = `${Math.min(100, t.battery)}%`;
+        }
+
+        /* Predictive Anomaly Logger Stream */
+        const ANOMALIES_POOL = [
+            { text: "Regolith abrasion warning: Wheel joint 3 friction index elevated +14%", type: "WARN", color: "text-amber-400" },
+            { text: "Thermal gradient delta approaching lunar shadow transition limit", type: "INFO", color: "text-sky-400" },
+            { text: "Solar array photon efficiency dropped 2.1% due to dust electrostatic adhesion", type: "WARN", color: "text-amber-400" },
+            { text: "DTN link scheduled: Earth White Sands ground terminal pass in T-28m", type: "INFO", color: "text-emerald-400" },
+            { text: "Potassium loop pressure spike detected on auxiliary radiator coil", type: "WARN", color: "text-amber-400" },
+            { text: "Micrometeorite kinetic sensor: Negligible velocity ping logged on north skirt", type: "INFO", color: "text-slate-400" },
+            { text: "Radiation flux excursion: Solar particle event probability <0.8%", type: "INFO", color: "text-emerald-400" }
+        ];
+
+        function addAnomalyLog(entry = null) {
+            const logContainer = document.getElementById('anomaly-log-stream');
+            const data = entry || ANOMALIES_POOL[Math.floor(Math.random() * ANOMALIES_POOL.length)];
+            const timeStr = new Date().toISOString().substring(11, 19);
+
+            const div = document.createElement('div');
+            div.className = 'border-l-2 border-slate-700 pl-1.5 py-0.5 leading-tight';
+            div.innerHTML = `<span class="text-slate-500 font-bold">${timeStr}</span> <span class="${data.color}">[${data.type}]</span> <span class="text-slate-300">${data.text}</span>`;
+            logContainer.prepend(div);
+
+            if (logContainer.children.length > 25) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        // Initialize logs
+        for (let i = 0; i < 4; i++) {
+            addAnomalyLog(ANOMALIES_POOL[i]);
+        }
+
+        /* Periodic Simulated Sensor Jitter */
+        setInterval(() => {
+            LUNAR_ASSETS.forEach(asset => {
+                asset.telemetry.thermal += (Math.random() - 0.5) * 0.4;
+                asset.telemetry.radiation = Math.max(0.1, asset.telemetry.radiation + (Math.random() - 0.5) * 0.02);
+                asset.telemetry.battery = Math.max(10, Math.min(100, asset.telemetry.battery + (Math.random() - 0.5) * 0.05));
+                asset.telemetry.dust = Math.max(0, Math.min(80, asset.telemetry.dust + 0.002));
+            });
+            updateTelemetryDisplay();
+        }, 1200);
+
+        setInterval(() => {
+            if (Math.random() > 0.45) {
+                addAnomalyLog();
+            }
+        }, 7000);
+
+        document.querySelectorAll('.nav-view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.nav-view-btn').forEach(b => {
+                    b.classList.remove('bg-lunar-accent/20', 'border-lunar-accent', 'text-lunar-accent');
+                    b.classList.add('bg-slate-900/80', 'border-slate-700', 'text-slate-300');
+                });
+                btn.classList.add('bg-lunar-accent/20', 'border-lunar-accent', 'text-lunar-accent');
+                btn.classList.remove('bg-slate-900/80', 'border-slate-700', 'text-slate-300');
+
+                const view = btn.getAttribute('data-view');
+                setCameraView(view);
+            });
+        });
+
+        document.getElementById('btn-zoom-in').addEventListener('click', () => {
+            camera.position.lerp(currentLookAt, 0.25);
+            targetCamPos.copy(camera.position);
+        });
+
+        document.getElementById('btn-zoom-out').addEventListener('click', () => {
+            camera.position.lerp(currentLookAt, -0.35);
+            targetCamPos.copy(camera.position);
+        });
+
+        document.getElementById('btn-reset-cam').addEventListener('click', () => {
+            setCameraView('global');
+        });
+
+        document.getElementById('btn-toggle-autospin').addEventListener('click', function() {
+            autoRotate = !autoRotate;
+            this.innerHTML = `<i class="fa-solid fa-rotate mr-1"></i> ROTATE: ${autoRotate ? 'ON' : 'OFF'}`;
+        });
+
+        document.getElementById('sun-slider').addEventListener('input', (e) => {
+            sunAngleDeg = parseFloat(e.target.value);
+            updateSunPosition(sunAngleDeg);
+        });
+
+        document.getElementById('btn-emergency-ping').addEventListener('click', () => {
+            addAnomalyLog({
+                text: "CRITICAL: Surface regolith sensor triggered electrostatic threshold excursion on Sector 4!",
+                type: "ALERT",
+                color: "text-rose-500 font-bold"
+            });
+            const pill = document.getElementById('twin-status-pill');
+            pill.className = 'text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/50 font-bold animate-bounce';
+            pill.textContent = 'CHECK SENSORS';
+            setTimeout(() => {
+                pill.className = 'text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold';
+                pill.textContent = 'ACTIVE';
+            }, 5000);
+        });
+
+        // Hide/Show HUD toggler
+        let hudVisible = true;
+        document.getElementById('btn-toggle-hud').addEventListener('click', () => {
+            hudVisible = !hudVisible;
+            document.getElementById('left-sidebar').classList.toggle('opacity-0', !hudVisible);
+            document.getElementById('right-sidebar').classList.toggle('opacity-0', !hudVisible);
+            document.getElementById('left-sidebar').classList.toggle('pointer-events-none', !hudVisible);
+            document.getElementById('right-sidebar').classList.toggle('pointer-events-none', !hudVisible);
+        });
+
+        /* Window resize responsiveness */
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            miniCamera.aspect = miniCanvas.clientWidth / miniCanvas.clientHeight;
+            miniCamera.updateProjectionMatrix();
+            miniRenderer.setSize(miniCanvas.clientWidth, miniCanvas.clientHeight);
+        });
+
+        /* Initialize default asset state */
+        selectAsset('base-alpha');
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // Smooth camera transition if active
+            if (isTransitioning) {
+                camera.position.lerp(targetCamPos, 0.045);
+                currentLookAt.lerp(targetCamLookAt, 0.045);
+                camera.lookAt(currentLookAt);
+
+                if (camera.position.distanceTo(targetCamPos) < 0.1 && currentLookAt.distanceTo(targetCamLookAt) < 0.1) {
+                    isTransitioning = false;
+                }
+            } else if (autoRotate && !isDragging) {
+                // Subtle planetary orbit drift
+                moonMesh.rotation.y += delta * 0.02;
+                assetMarkersGroup.rotation.y += delta * 0.02;
+                southPoleRing.rotation.z += delta * 0.02;
+            } else {
+                camera.lookAt(currentLookAt);
+            }
+
+            // Pulse beacon pins
+            const elapsed = clock.getElapsedTime();
+            assetMarkersGroup.children.forEach((marker) => {
+                if (marker.userData && marker.userData.headMesh) {
+                    const s = 1.0 + Math.sin(elapsed * 4 + marker.position.x) * 0.15;
+                    marker.userData.headMesh.scale.set(s, s, s);
+                }
+            });
+
+            // Rotate mini wireframe mesh
+            if (miniTwinMeshGroup) {
+                miniTwinMeshGroup.rotation.y += delta * 0.6;
+                miniRenderer.render(miniScene, miniCamera);
+            }
+
+            // Update live HUD coordinate text
+            const distKm = Math.round(camera.position.distanceTo(moonMesh.position) * 38.4);
+            document.getElementById('hud-alt').textContent = `${distKm} km`;
+
+            renderer.render(scene, camera);
+        }
+
+        // Boot execution
+        window.onload = function() {
+            animate();
+        };
+    </script>
+</body>
+</html>
